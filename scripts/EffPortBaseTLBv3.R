@@ -5,56 +5,94 @@
 #
 # Functions and data records:
 #   effPort_MakeQuadParams: returns list of Amat, bvec, dvec, and meq parameters for quadprod solver from input parameters
-#   effPort_MakeQuadResultsFrame: returns an empty data frame of the correct size and columns names for frontier results
+#   effPort_MakeQuadResultsMatrix: returns an empty matrix of the correct size, shape, and columns names for frontier results
 #   effPort_SinglePoint: returns results for a single point on the efficient frontier
 #   effPort_MakeFrontier: returns results for an entire frontier of points
 #   effPort_CalcRiskMult: returns risk multiplier to hit near a selected portfolio risk target
-#
+# add routines for:
+#   routines to sort expected returns and covariances into ascending or descending order of return, or std dev.
+#   cleanup results to only those tickers used in a portfolio
+#   plot base results
+#   standard data record to hold ticker inputs
+#   standard data record to hold frontier outputs, including notations
+#   standard data record to hold ticker inputs and any number of frontier outputs
+#   routines to create the normal set of plots from the above
 
-effPort_MakeQuadParams <- function(expRet, covRet, short="no", max.allocation=NULL) {
-  # Output: list of Amat, bvec, dvec, and meq for quadprod function calls
+effPort_MakeQuadResultsMatrix <- function(covRet, nPoints) {
+  # Output: empty matrix of the size and shape to hold efficient frontier points.list of Amat, bvec, dvec, and meq for quadprod function calls
   # Input Args:
-  # expRet - m x 1 vector of expected returns - row order must match the covariance matrix row & column order
   # covRet - m x m matrix of covariances between the assets
-  # short - determines if short-selling is allowed: "no" or "yes"; default is "no" (short selling prohibited)
-  # max.allocation is the maximum fraction allowed for any one security (reduces concentration) - range 0< x <1
+  # nPoints - scalar that sets the number of frontier data points to store in the results matrix
   #
-  # NB:  expected returns and covariance are best (perhaps required) to be a matrix, not a dataframe.  Best practice is to call this routine with them already as matrices.
+  # NB:  covariance are best (perhaps required) to be a matrix, not a dataframe.  Best practice is to call this routine with them already as matrices.
   # for safety, this routine forces them to matrix before other calculations are completed.
   #
-  expRet <- as.matrix(expRet)
+  
   covRet <- as.matrix(covRet)
   n <- ncol(covRet)
   
-  # Create initial Amat and bvec assuming only equality constraint (short-selling is allowed, no allocation constraints)
-  Amat <- matrix (1, nrow=n)
-  bvec <- 1
-  meq <- 1
+  # Initialize a results matrix to contain allocation and statistics
+  iMat <- matrix(nrow = loops, ncol = n + 4)
+  # Now give column names to the output matrix
+  colnames(iMat) <-
+    c(colnames(covRet), "Std.Dev", "Exp.Ret", "Sharpe", "Idx")
   
-  # Then modify the Amat and bvec if short-selling is prohibited
-  if(short=="no"){
-    Amat <- cbind(1, diag(n))
-    bvec <- c(bvec, rep(0, n))
-  }
-  
-  # And modify Amat and bvec if a max allocation (concentration) is specified
-  if(!is.null(max.allocation)){
-    if(max.allocation >= 1 | max.allocation <=0){
-      stop("max.allocation must be greater than 0 and less than 1")
-    }
-    if(max.allocation * n < 1){
-      stop("Need to set max.allocation higher; not enough assets to add to 1")
-    }
-    Amat <- cbind(Amat, -diag(n))
-    bvec <- c(bvec, rep(-max.allocation, n))
-  }
-  
-  # Nominal value of dvec: when multiplier equals 1.0.  Should be adjusted when really calling solve.QP.
-  dvec <- t(expRet) * 1.0
-  
-  ilist <- list(Amat=Amat, bvec=bvec, dvec=dvec, meq=meq)
-  return( ilist )
+  return(iMat)
 }
+
+effPort_MakeQuadParams <-
+  function(expRet,
+           covRet,
+           short = "no",
+           max.allocation = NULL) {
+    # Output: list of Amat, bvec, dvec, and meq for quadprod function calls
+    # Input Args:
+    # expRet - m x 1 vector of expected returns - row order must match the covariance matrix row & column order
+    # covRet - m x m matrix of covariances between the assets
+    # short - determines if short-selling is allowed: "no" or "yes"; default is "no" (short selling prohibited)
+    # max.allocation is the maximum fraction allowed for any one security (reduces concentration) - range 0< x <1
+    #
+    # NB:  expected returns and covariance are best (perhaps required) to be a matrix, not a dataframe.  Best practice is to call this routine with them already as matrices.
+    # for safety, this routine forces them to matrix before other calculations are completed.
+    #
+    expRet <- as.matrix(expRet)
+    covRet <- as.matrix(covRet)
+    n <- ncol(covRet)
+    
+    # Create initial Amat and bvec assuming only equality constraint (short-selling is allowed, no allocation constraints)
+    Amat <- matrix (1, nrow = n)
+    bvec <- 1
+    meq <- 1
+    
+    # Then modify the Amat and bvec if short-selling is prohibited
+    if (short == "no") {
+      Amat <- cbind(1, diag(n))
+      bvec <- c(bvec, rep(0, n))
+    }
+    
+    # And modify Amat and bvec if a max allocation (concentration) is specified
+    if (!is.null(max.allocation)) {
+      if (max.allocation >= 1 | max.allocation <= 0) {
+        stop("max.allocation must be greater than 0 and less than 1")
+      }
+      if (max.allocation * n < 1) {
+        stop("Need to set max.allocation higher; not enough assets to add to 1")
+      }
+      Amat <- cbind(Amat,-diag(n))
+      bvec <- c(bvec, rep(-max.allocation, n))
+    }
+    
+    # Nominal value of dvec: when multiplier equals 1.0.  Should be adjusted when really calling solve.QP.
+    dvec <- t(expRet) * 1.0
+    
+    ilist <- list(
+      Amat = Amat,
+      bvec = bvec,
+      dvec = dvec,
+      meq = meq
+    )
+    return(ilist)
+  }
 
 
 makeEfficientFrontier <- function (expRet, covRet, short="no", max.allocation=NULL, risk.premium.up=.5, risk.increment=.005){
